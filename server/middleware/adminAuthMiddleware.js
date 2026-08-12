@@ -534,6 +534,7 @@ async function login(req, res) {
 }
 async function completeAdminLogin({ req, res, username, role, scopes, ip, userAgent, suspicious }) {
   // Create session in PostgreSQL (audit trail + persistence)
+  const csrfToken = crypto.randomBytes(32).toString('hex');
   const session = await createAdminSession({
     username,
     metadata: {
@@ -544,6 +545,7 @@ async function completeAdminLogin({ req, res, username, role, scopes, ip, userAg
       role,
       scopes,
       twoFactorVerified: true,
+      csrfToken,
       suspiciousLogin: !!suspicious?.suspicious,
       suspiciousReason: suspicious?.reason || null,
     },
@@ -583,6 +585,15 @@ async function completeAdminLogin({ req, res, username, role, scopes, ip, userAg
     expires: new Date(session.expiresAt),
   });
 
+  // CSRF token for state-changing admin requests — must be readable by the
+  // dashboard so it can be echoed back via the x-csrf-token header.
+  res.cookie('ns_csrf_token', csrfToken, {
+    httpOnly: false,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    expires: new Date(session.expiresAt),
+  });
+
   await recordAdminLoginAttempt({
     username,
     ipAddress: ip,
@@ -610,6 +621,7 @@ async function completeAdminLogin({ req, res, username, role, scopes, ip, userAg
     expiresAt: session.expiresAt,
     role,
     scopes,
+    csrfToken,
     suspicious: !!suspicious?.suspicious,
   });
 }
